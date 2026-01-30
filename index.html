@@ -336,6 +336,7 @@
     });
 
     let career = loadCareer() || defaultCareer();
+    let hasSave = Boolean(loadCareer());
 
     const playbook = [
       { id: 1, name: "Inside Zone", type: "run", description: "Follow blockers and burst." },
@@ -366,6 +367,10 @@
       hasBall: true,
       stamina: 100,
       tackleCooldown: 0,
+    };
+
+    const spriteAssets = {
+      frames: [],
     };
 
     const teammates = [];
@@ -415,6 +420,7 @@
       match.playType = "run";
       match.message = "";
       match.ball = { x: FIELD.width / 2, y: FIELD.height - 120, owner: "player" };
+      match.airTarget = null;
       player.x = FIELD.width / 2;
       player.y = FIELD.height - 140;
       player.hasBall = true;
@@ -471,6 +477,7 @@
     function saveCareer() {
       career.savedAt = Date.now();
       localStorage.setItem("footballFuryCareer", JSON.stringify(career));
+      hasSave = true;
     }
 
     function loadCareer() {
@@ -486,6 +493,7 @@
     function clearCareer() {
       localStorage.removeItem("footballFuryCareer");
       career = defaultCareer();
+      hasSave = false;
       resetMatch();
       showMenu();
     }
@@ -509,7 +517,7 @@
         <p class="tiny">Build a player, call plays, and climb from high school to the NFL.</p>
         <div class="row">
           <button id="new-career">New Career</button>
-          <button id="continue-career" class="secondary">Continue</button>
+          <button id="continue-career" class="secondary" ${hasSave ? "" : "disabled"}>Continue</button>
         </div>
         <div class="row" style="margin-top: 10px;">
           <button id="upgrade-menu" class="secondary">Upgrade Player</button>
@@ -517,8 +525,15 @@
         </div>
       `;
       showOverlay(modal);
-      modal.querySelector("#new-career").addEventListener("click", showCreator);
+      modal.querySelector("#new-career").addEventListener("click", () => {
+        career = defaultCareer();
+        showCreator();
+      });
       modal.querySelector("#continue-career").addEventListener("click", () => {
+        if (!hasSave) return;
+        career = loadCareer() || defaultCareer();
+        updatePlayerStats();
+        resetMatch();
         hideOverlay();
         gameState.screen = "game";
       });
@@ -555,6 +570,7 @@
         resetMatch();
         updatePlayerStats();
         saveCareer();
+        hasSave = true;
         hideOverlay();
         gameState.screen = "game";
       });
@@ -670,6 +686,47 @@
         `Awards: ${career.totalAwards}`,
       ];
       timelinePanel.innerHTML = timeline.map((entry) => `<div>${entry}</div>`).join("");
+    }
+
+    function buildSprites() {
+      const colors = [
+        "#3cc5ff",
+        "#4ad4ff",
+        "#7ad1ff",
+        "#2da0c6",
+      ];
+      spriteAssets.frames = colors.map((color, index) => {
+        const spriteCanvas = document.createElement("canvas");
+        spriteCanvas.width = 32;
+        spriteCanvas.height = 32;
+        const spriteCtx = spriteCanvas.getContext("2d");
+        spriteCtx.fillStyle = color;
+        spriteCtx.fillRect(8, 4, 16, 24);
+        spriteCtx.fillStyle = "#0b2239";
+        spriteCtx.fillRect(10, 6 + index, 12, 6);
+        spriteCtx.fillStyle = "#fff";
+        spriteCtx.fillRect(12, 10 + index, 4, 4);
+        spriteCtx.fillRect(18, 10 + index, 4, 4);
+        spriteCtx.fillStyle = "#e2b45f";
+        spriteCtx.fillRect(13, 18 + index, 6, 8);
+        return spriteCanvas;
+      });
+    }
+
+    function drawSprite(entity, highlightColor) {
+      if (!spriteAssets.frames.length) return;
+      const frameIndex = Math.floor(Date.now() / 140) % spriteAssets.frames.length;
+      const sprite = spriteAssets.frames[frameIndex];
+      ctx.save();
+      ctx.drawImage(sprite, entity.x - 16, entity.y - 16);
+      if (highlightColor) {
+        ctx.strokeStyle = highlightColor;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(entity.x, entity.y, entity.radius + 6, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
 
     function handleInput(dt) {
@@ -886,22 +943,13 @@
 
     function renderActors() {
       teammates.forEach((mate) => {
-        ctx.fillStyle = "#3cc5ff";
-        ctx.beginPath();
-        ctx.arc(mate.x, mate.y, mate.radius, 0, Math.PI * 2);
-        ctx.fill();
+        drawSprite(mate);
       });
       opponents.forEach((defender) => {
-        ctx.fillStyle = "#ff5e5e";
-        ctx.beginPath();
-        ctx.arc(defender.x, defender.y, defender.radius, 0, Math.PI * 2);
-        ctx.fill();
+        drawSprite(defender, "#ff5e5e");
       });
 
-      ctx.fillStyle = positionTemplates[career.player.position]?.color || "#fff";
-      ctx.beginPath();
-      ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
-      ctx.fill();
+      drawSprite(player, positionTemplates[career.player.position]?.color || "#fff");
 
       if (match.ball.owner === "player") {
         ctx.fillStyle = "#d49a39";
@@ -986,6 +1034,7 @@
     });
 
     function init() {
+      buildSprites();
       updatePlayerStats();
       resetMatch();
       showMenu();
