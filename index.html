@@ -32,7 +32,7 @@
 
     #game-panel {
       position: relative;
-      background: linear-gradient(180deg, #0c3b18, #082810);
+      background: radial-gradient(circle at top, #0c5b2b, #072a14 55%, #061a0f 100%);
     }
 
     #game-canvas {
@@ -58,6 +58,21 @@
       padding: 8px 12px;
       border: 1px solid rgba(255, 255, 255, 0.08);
       min-width: 120px;
+    }
+
+    .scoreboard {
+      min-width: 220px;
+      text-transform: uppercase;
+      font-size: 12px;
+      letter-spacing: 0.8px;
+      background: linear-gradient(135deg, rgba(35, 50, 72, 0.9), rgba(11, 17, 28, 0.95));
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.05);
+    }
+
+    .scoreboard strong {
+      font-size: 18px;
+      letter-spacing: 1.2px;
     }
 
     #side-panel {
@@ -102,6 +117,12 @@
 
     button:hover {
       transform: translateY(-1px);
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+      transform: none;
     }
 
     button.secondary {
@@ -238,7 +259,7 @@
     <section id="game-panel">
       <canvas id="game-canvas" width="960" height="600"></canvas>
       <div id="hud">
-        <div class="hud-card" id="hud-score"></div>
+        <div class="hud-card scoreboard" id="hud-scoreboard"></div>
         <div class="hud-card" id="hud-info"></div>
         <div class="hud-card" id="hud-xp"></div>
       </div>
@@ -254,6 +275,10 @@
         <div class="list" id="play-call"></div>
       </div>
       <div class="panel-card">
+        <h2>Season Center</h2>
+        <div class="list" id="season-actions"></div>
+      </div>
+      <div class="panel-card">
         <h2>Controls</h2>
         <div class="key-list">
           Move: WASD / Arrow Keys<br />
@@ -267,6 +292,10 @@
         <h2>Career Timeline</h2>
         <div class="list" id="timeline"></div>
       </div>
+      <div class="panel-card">
+        <h2>Team Roster</h2>
+        <div class="list" id="roster-panel"></div>
+      </div>
     </aside>
   </div>
 
@@ -274,12 +303,14 @@
     const canvas = document.getElementById("game-canvas");
     const ctx = canvas.getContext("2d");
     const overlay = document.getElementById("overlay");
-    const hudScore = document.getElementById("hud-score");
+    const hudScoreboard = document.getElementById("hud-scoreboard");
     const hudInfo = document.getElementById("hud-info");
     const hudXp = document.getElementById("hud-xp");
     const careerSummary = document.getElementById("career-summary");
     const playCallPanel = document.getElementById("play-call");
+    const seasonActions = document.getElementById("season-actions");
     const timelinePanel = document.getElementById("timeline");
+    const rosterPanel = document.getElementById("roster-panel");
 
     const FIELD = {
       width: canvas.width,
@@ -295,7 +326,31 @@
       keys: new Set(),
     };
 
-    const CAREER_STAGES = ["High School", "College", "NFL"]; 
+    const CAREER_STAGES = ["High School", "College", "NFL"];
+
+    const TEAM_POOLS = {
+      "High School": [
+        { name: "River Hawks", abbr: "RVH", colors: ["#1d4ed8", "#0ea5e9"] },
+        { name: "Mesa Wolves", abbr: "MSW", colors: ["#f97316", "#facc15"] },
+        { name: "Oak Titans", abbr: "OAK", colors: ["#16a34a", "#22c55e"] },
+        { name: "Metro Knights", abbr: "MTK", colors: ["#7c3aed", "#a855f7"] },
+      ],
+      College: [
+        { name: "Western Tech", abbr: "WTC", colors: ["#22c55e", "#0f172a"] },
+        { name: "North State", abbr: "NST", colors: ["#38bdf8", "#0f172a"] },
+        { name: "Coastal U", abbr: "CSU", colors: ["#f97316", "#0f172a"] },
+        { name: "Metro U", abbr: "MTU", colors: ["#a855f7", "#0f172a"] },
+        { name: "Capital College", abbr: "CPC", colors: ["#facc15", "#1f2937"] },
+      ],
+      NFL: [
+        { name: "Gotham Guardians", abbr: "GCG", colors: ["#ef4444", "#0f172a"] },
+        { name: "Bay City Armada", abbr: "BCA", colors: ["#0ea5e9", "#0f172a"] },
+        { name: "Prairie Outlaws", abbr: "PRO", colors: ["#f97316", "#1f2937"] },
+        { name: "Capital Comets", abbr: "CPC", colors: ["#22c55e", "#0f172a"] },
+        { name: "Sunset Kings", abbr: "SSK", colors: ["#facc15", "#0f172a"] },
+        { name: "Harbor Legion", abbr: "HBL", colors: ["#6366f1", "#111827"] },
+      ],
+    };
 
     const positionTemplates = {
       QB: { skill: "Throw Power", color: "#4ad4ff" },
@@ -328,7 +383,13 @@
       seasonLength: 4,
       stageWins: 0,
       stageLosses: 0,
+      team: TEAM_POOLS["High School"][0],
+      roster: [],
+      schedule: [],
+      results: [],
+      currentOpponent: TEAM_POOLS["High School"][1],
       draftStock: 45,
+      draftPick: null,
       totalAwards: 0,
       offers: [],
       difficulty: 1,
@@ -345,7 +406,9 @@
     ];
 
     const match = {
+      quarterLength: 180,
       clock: 180,
+      quarter: 1,
       score: { us: 0, them: 0 },
       possession: "us",
       down: 1,
@@ -410,7 +473,8 @@
     }
 
     function resetMatch() {
-      match.clock = 180;
+      match.clock = match.quarterLength;
+      match.quarter = 1;
       match.score.us = 0;
       match.score.them = 0;
       match.possession = "us";
@@ -432,6 +496,43 @@
       return CAREER_STAGES[career.stageIndex];
     }
 
+    function stageTeams() {
+      return TEAM_POOLS[stageName()] || TEAM_POOLS["High School"];
+    }
+
+    function assignTeam() {
+      const availableTeams = stageTeams();
+      if (!career.team || !availableTeams.find((team) => team.name === career.team.name)) {
+        career.team = availableTeams[Math.floor(Math.random() * availableTeams.length)];
+      }
+    }
+
+    function generateRoster() {
+      const positions = ["QB", "RB", "WR", "WR", "TE", "LT", "RG", "CB", "LB", "FS"];
+      career.roster = positions.map((pos, index) => ({
+        name: `${pos}-${index + 1}`,
+        position: pos,
+        ovr: 60 + Math.floor(Math.random() * 20) + career.stageIndex * 8,
+      }));
+      career.roster.unshift({
+        name: career.player.name || "Rookie",
+        position: career.player.position,
+        ovr: career.player.ovr,
+      });
+    }
+
+    function generateSchedule() {
+      const teams = stageTeams().filter((team) => team.name !== career.team.name);
+      career.schedule = [];
+      career.results = [];
+      for (let week = 0; week < career.seasonLength; week += 1) {
+        const opponent = teams[week % teams.length];
+        career.schedule.push(opponent);
+        career.results.push({ week: week + 1, opponent, result: "TBD", score: "" });
+      }
+      career.currentOpponent = career.schedule[career.week - 1] || teams[0];
+    }
+
     function stageDifficulty() {
       return 1 + career.stageIndex * 0.6 + career.difficulty * 0.2;
     }
@@ -451,12 +552,20 @@
       } else {
         career.stageLosses += 1;
       }
+      career.results[career.week - 1] = {
+        week: career.week,
+        opponent: career.currentOpponent,
+        result: match.score.us > match.score.them ? "W" : "L",
+        score: `${match.score.us}-${match.score.them}`,
+      };
       if (match.score.us >= 2) {
         career.totalAwards += 1;
       }
       career.week += 1;
       if (career.week > career.seasonLength) {
         advanceStage();
+      } else {
+        career.currentOpponent = career.schedule[career.week - 1];
       }
       saveCareer();
     }
@@ -466,12 +575,25 @@
       career.stageIndex = Math.min(career.stageIndex + 1, CAREER_STAGES.length - 1);
       career.stageWins = 0;
       career.stageLosses = 0;
+      assignTeam();
+      generateRoster();
+      generateSchedule();
       if (career.stageIndex === 1) {
         career.offers = ["North State", "Western Tech", "Coastal U"].slice(0, 2 + Math.floor(career.player.ovr / 25));
       }
       if (career.stageIndex === 2) {
         career.draftStock = Math.min(99, career.player.ovr + career.totalAwards * 2);
+        runDraft();
       }
+    }
+
+    function runDraft() {
+      const teams = TEAM_POOLS.NFL;
+      const pick = Math.max(1, 32 - Math.floor(career.draftStock / 3));
+      career.draftPick = pick;
+      const team = teams[pick % teams.length];
+      career.team = team;
+      generateRoster();
     }
 
     function saveCareer() {
@@ -510,6 +632,7 @@
 
     function showMenu() {
       gameState.screen = "menu";
+      hasSave = Boolean(loadCareer());
       const modal = document.createElement("div");
       modal.className = "modal";
       modal.innerHTML = `
@@ -532,6 +655,10 @@
       modal.querySelector("#continue-career").addEventListener("click", () => {
         if (!hasSave) return;
         career = loadCareer() || defaultCareer();
+        assignTeam();
+        if (!career.roster?.length) generateRoster();
+        if (!career.schedule?.length) generateSchedule();
+        career.currentOpponent = career.schedule[career.week - 1];
         updatePlayerStats();
         resetMatch();
         hideOverlay();
@@ -567,6 +694,9 @@
         career.player.name = modal.querySelector("#player-name").value || "Rookie";
         career.player.position = modal.querySelector("#player-position").value;
         career.player.school = modal.querySelector("#player-school").value || "Central HS";
+        assignTeam();
+        generateRoster();
+        generateSchedule();
         resetMatch();
         updatePlayerStats();
         saveCareer();
@@ -663,29 +793,75 @@
     }
 
     function updateHud() {
-      hudScore.innerHTML = `<div class="tag">${stageName()}</div> Score ${match.score.us}-${match.score.them}<br/>Time ${Math.ceil(match.clock)}s`;
+      hudScoreboard.innerHTML = `
+        <div class="tag">${stageName()}</div>
+        <strong>${career.team.abbr} ${match.score.us} - ${match.score.them} ${career.currentOpponent?.abbr || "OPP"}</strong>
+        <div>${career.team.name} vs ${career.currentOpponent?.name || "Opponent"}</div>
+        <div>Q${match.quarter} • ${formatClock(match.clock)}</div>
+      `;
       hudInfo.innerHTML = `Down ${match.down} &amp; ${match.yardsToGo} | OVR ${career.player.ovr}<br/>Week ${career.week}/${career.seasonLength}`;
       const xpPercent = Math.min(100, (career.player.xp / 600) * 100);
       hudXp.innerHTML = `XP ${career.player.xp}<div class="meter"><span style="width:${xpPercent}%"></span></div>`;
 
       careerSummary.innerHTML = `
         <div><span class="tag">${career.player.position}</span> ${career.player.name || "Rookie"}</div>
-        <div>${career.player.school || "Central HS"}</div>
+        <div>${career.team?.name || "Central HS"}</div>
         <div>Record: ${career.stageWins}-${career.stageLosses}</div>
         <div>Draft Stock: ${career.draftStock}</div>
+        <div>${career.draftPick ? `Draft Pick: #${career.draftPick}` : ""}</div>
       `;
 
       playCallPanel.innerHTML = playbook
         .map((play) => `<div><strong>${play.id}. ${play.name}</strong><br/><span class="tiny">${play.description}</span></div>`)
         .join("");
 
+      seasonActions.innerHTML = `
+        <button id="play-game">Play Game</button>
+        <button id="sim-game" class="secondary">Sim Game</button>
+        <button id="fullscreen" class="secondary">Fullscreen</button>
+        <div class="tiny">Opponent: ${career.currentOpponent?.name || "TBD"}</div>
+        <div class="tiny">Last: ${career.results?.[career.week - 2]?.result || "—"} ${career.results?.[career.week - 2]?.score || ""}</div>
+      `;
+
       const timeline = [
         `${CAREER_STAGES[0]}: ${career.stageIndex === 0 ? "Current" : "Complete"}`,
         `${CAREER_STAGES[1]}: ${career.stageIndex === 1 ? "Current" : career.stageIndex > 1 ? "Complete" : "Locked"}`,
         `${CAREER_STAGES[2]}: ${career.stageIndex === 2 ? "Current" : "Locked"}`,
         `Awards: ${career.totalAwards}`,
+        `Next: ${career.currentOpponent?.abbr || "TBD"}`,
       ];
       timelinePanel.innerHTML = timeline.map((entry) => `<div>${entry}</div>`).join("");
+
+      rosterPanel.innerHTML = career.roster
+        .slice(0, 8)
+        .map((playerInfo) => `<div>${playerInfo.position} ${playerInfo.name} <span class="tiny">OVR ${playerInfo.ovr}</span></div>`)
+        .join("");
+    }
+
+    function formatClock(seconds) {
+      const minutes = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60).toString().padStart(2, "0");
+      return `${minutes}:${secs}`;
+    }
+
+    function simulateGame() {
+      const base = career.player.ovr + career.stageIndex * 5;
+      const opponent = 60 + career.stageIndex * 8 + Math.floor(Math.random() * 10);
+      const ourScore = Math.max(0, Math.round((base / 15) + Math.random() * 3));
+      const oppScore = Math.max(0, Math.round((opponent / 16) + Math.random() * 3));
+      match.score.us = ourScore;
+      match.score.them = oppScore;
+      match.quarter = 4;
+      match.clock = 0;
+      endMatch();
+    }
+
+    function toggleFullscreen() {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen();
+      } else {
+        document.exitFullscreen();
+      }
     }
 
     function buildSprites() {
@@ -750,7 +926,12 @@
 
       match.clock = Math.max(0, match.clock - dt);
       if (match.clock === 0) {
-        endMatch();
+        if (match.quarter < 4) {
+          match.quarter += 1;
+          match.clock = match.quarterLength;
+        } else {
+          endMatch();
+        }
         return;
       }
 
@@ -926,10 +1107,13 @@
     }
 
     function renderField() {
+      const fieldTop = career.team?.colors?.[0] || "#0c6b2f";
+      const fieldBottom = career.team?.colors?.[1] || "#0a4a22";
       ctx.fillStyle = "#0c6b2f";
       ctx.fillRect(0, 0, FIELD.width, FIELD.height);
-      ctx.fillStyle = "#0a4a22";
+      ctx.fillStyle = fieldTop;
       ctx.fillRect(0, 0, FIELD.width, FIELD.endZoneHeight);
+      ctx.fillStyle = fieldBottom;
       ctx.fillRect(0, FIELD.height - FIELD.endZoneHeight, FIELD.width, FIELD.endZoneHeight);
       ctx.strokeStyle = "rgba(255,255,255,0.25)";
       ctx.lineWidth = 2;
@@ -939,6 +1123,20 @@
         ctx.lineTo(FIELD.width, y);
         ctx.stroke();
       }
+
+      ctx.fillStyle = "rgba(255,255,255,0.6)";
+      ctx.font = "bold 14px Trebuchet MS";
+      ctx.textAlign = "center";
+      for (let yard = 10; yard < 100; yard += 10) {
+        const y = FIELD.height - FIELD.endZoneHeight - (yard / 100) * (FIELD.height - FIELD.endZoneHeight * 2);
+        ctx.fillText(yard.toString(), 40, y);
+        ctx.fillText(yard.toString(), FIELD.width - 40, y);
+      }
+
+      ctx.fillStyle = "rgba(0,0,0,0.35)";
+      ctx.font = "bold 20px Trebuchet MS";
+      ctx.fillText(career.team?.abbr || "HOME", FIELD.width / 2, FIELD.endZoneHeight / 1.5);
+      ctx.fillText(career.currentOpponent?.abbr || "AWAY", FIELD.width / 2, FIELD.height - FIELD.endZoneHeight / 2.5);
     }
 
     function renderActors() {
@@ -999,6 +1197,10 @@
     window.addEventListener("keydown", (event) => {
       gameState.keys.add(event.key);
       if (event.key === "Escape") {
+        if (gameState.screen === "creator") {
+          showMenu();
+          return;
+        }
         gameState.paused = !gameState.paused;
         if (gameState.paused) {
           showPauseMenu();
@@ -1033,8 +1235,31 @@
       gameState.keys.delete(event.key);
     });
 
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay && gameState.screen === "creator") {
+        showMenu();
+      }
+    });
+
+    seasonActions.addEventListener("click", (event) => {
+      if (event.target.id === "play-game") {
+        hideOverlay();
+        gameState.screen = "game";
+      }
+      if (event.target.id === "sim-game") {
+        simulateGame();
+      }
+      if (event.target.id === "fullscreen") {
+        toggleFullscreen();
+      }
+    });
+
     function init() {
       buildSprites();
+      assignTeam();
+      if (!career.roster?.length) generateRoster();
+      if (!career.schedule?.length) generateSchedule();
+      career.currentOpponent = career.schedule[career.week - 1];
       updatePlayerStats();
       resetMatch();
       showMenu();
